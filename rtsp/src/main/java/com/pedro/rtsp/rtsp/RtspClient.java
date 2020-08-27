@@ -132,8 +132,11 @@ public class RtspClient {
       }
       String host = rtspMatcher.group(1);
       int port = Integer.parseInt((rtspMatcher.group(2) != null) ? rtspMatcher.group(2) : "554");
-      String path = "/" + rtspMatcher.group(3) + "/" + rtspMatcher.group(4);
+      String path = "/" + rtspMatcher.group(3);
+      String part4 = rtspMatcher.group(4);
+      if (part4 != null && !part4.isEmpty()) path += "/" + part4;
       commandsManager.setUrl(host, port, path);
+      commandsManager.setProtocol(Protocol.UDP);
 
       rtspSender.setSocketsInfo(commandsManager.getProtocol(),
           commandsManager.getVideoClientPorts(), commandsManager.getAudioClientPorts());
@@ -162,11 +165,11 @@ public class RtspClient {
             writer = new BufferedWriter(new OutputStreamWriter(outputStream));
             writer.write(commandsManager.createOptions());
             writer.flush();
-            commandsManager.getResponse(reader, connectCheckerRtsp, false, false);
-            writer.write(commandsManager.createAnnounce());
+            String response = commandsManager.getResponse(reader, connectCheckerRtsp, false, false);
+            writer.write(commandsManager.createDescribe());
             writer.flush();
             //check if you need credential for stream, if you need try connect with credential
-            String response = commandsManager.getResponse(reader, connectCheckerRtsp, false, false);
+            response = commandsManager.getResponse2(reader, connectCheckerRtsp, false, false);
             int status = commandsManager.getResponseStatus(response);
             if (status == 403) {
               connectCheckerRtsp.onConnectionFailedRtsp("Error configure stream, access denied");
@@ -196,15 +199,17 @@ public class RtspClient {
             }
             writer.write(commandsManager.createSetup(commandsManager.getTrackAudio()));
             writer.flush();
-            commandsManager.getResponse(reader, connectCheckerRtsp, true, true);
+            response = commandsManager.getResponse(reader, connectCheckerRtsp, true, true);
             if (!commandsManager.isOnlyAudio()) {
               writer.write(commandsManager.createSetup(commandsManager.getTrackVideo()));
               writer.flush();
               commandsManager.getResponse(reader, connectCheckerRtsp, false, true);
             }
+            /*
             writer.write(commandsManager.createRecord());
             writer.flush();
             commandsManager.getResponse(reader, connectCheckerRtsp, false, true);
+             */
 
             rtspSender.setDataStream(outputStream, commandsManager.getHost());
             int[] videoPorts = commandsManager.getVideoServerPorts();

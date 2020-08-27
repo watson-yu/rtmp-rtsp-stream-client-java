@@ -30,7 +30,7 @@ public class CommandsManager {
   private long timeStamp;
   private int sampleRate = 32000;
   private boolean isStereo = true;
-  private int trackAudio = 0;
+  private int trackAudio = 2;//0;
   private int trackVideo = 1;
   private Protocol protocol;
   private boolean isOnlyAudio;
@@ -272,20 +272,22 @@ public class CommandsManager {
   public String createSetup(int track) {
     int[] udpPorts = track == trackVideo ? videoClientPorts : audioClientPorts;
     String params =
-        (protocol == Protocol.UDP) ? ("UDP;unicast;client_port=" + udpPorts[0] + "-" + udpPorts[1] + ";mode=record")
-            : ("TCP;interleaved=" + 2 * track + "-" + (2 * track + 1) + ";mode=record");
+        (protocol == Protocol.UDP) ? ("UDP;unicast;client_port=" + udpPorts[0] + "-" + udpPorts[1]/* + ";mode=record"*/)
+            : ("TCP;interleaved=" + 2 * track + "-" + (2 * track + 1)/* + ";mode=record"*/);
     String setup = "SETUP rtsp://"
         + host
         + ":"
         + port
         + path
-        + "/trackID="
+        //+ "/trackID="
+        + "/track"
         + track
         + " RTSP/1.0\r\n"
         + "Transport: RTP/AVP/"
         + params
         + "\r\n"
         + addHeaders();
+    //setup = "SETUP rtsp://192.168.1.1/h264/track2 RTSP/1.0\r\nTransport: RTP/AVP/UDP;unicast;client_port=5000-5001\r\n" + addHeaders();
     Log.i(TAG, setup);
     return setup;
   }
@@ -430,6 +432,88 @@ public class CommandsManager {
       return Integer.parseInt(matcher.group(1));
     } else {
       return -1;
+    }
+  }
+
+  public String createDescribe() {
+    String body = "";
+    String describe = "DESCRIBE rtsp://"
+            + host
+            + ":"
+            + port
+            + path
+            + " RTSP/1.0\r\n"
+            + "CSeq: "
+            + (++cSeq)
+            + "\r\n"
+            + "Content-Length: "
+            + body.length()
+            + "\r\n"
+            + (authorization == null ? "" : "Authorization: " + authorization  + "\r\n")
+            + "Content-Type: application/sdp\r\n\r\n"
+            + body;
+    Log.i(TAG, describe);
+    return describe;
+  }
+
+  public String getResponse2(BufferedReader reader, ConnectCheckerRtsp connectCheckerRtsp,
+                            boolean isAudio, boolean checkStatus) {
+    try {
+      String response = "";
+      String line;
+      boolean headerComplete = false;
+      int contentLen = 0, receivedContentLen = 0;
+
+      while ((line = reader.readLine()) != null) {
+        if (line.contains("Session")) {
+          Pattern rtspPattern = Pattern.compile("Session: (\\w+)");
+          Matcher matcher = rtspPattern.matcher(line);
+          if (matcher.find()) {
+            sessionId = matcher.group(1);
+          }
+          sessionId = line.split(";")[0].split(":")[1].trim();
+        }
+        if (line.contains("server_port")) {
+          Pattern rtspPattern = Pattern.compile("server_port=([0-9]+)-([0-9]+)");
+          Matcher matcher = rtspPattern.matcher(line);
+          if (matcher.find()) {
+            if (isAudio) {
+              audioServerPorts[0] = Integer.parseInt(matcher.group(1));
+              audioServerPorts[1] = Integer.parseInt(matcher.group(2));
+            } else {
+              videoServerPorts[0] = Integer.parseInt(matcher.group(1));
+              videoServerPorts[1] = Integer.parseInt(matcher.group(2));
+            }
+          }
+        }
+        response += line + "\n";
+        if (headerComplete) receivedContentLen += line.length() + 2; // "\r\n"
+
+        //end of response
+        if (headerComplete && receivedContentLen >= contentLen) break;
+
+        if (line.length() < 3) {
+          if (headerComplete) break;
+          else headerComplete = true;
+        } else {
+          String[] parts = line.split(": ");
+          if (parts.length > 0 && "Content-Length".equals(parts[0])) {
+            try {
+              contentLen = Integer.parseInt(parts[1]);
+            } catch (Exception e) {
+              contentLen = 0;
+            }
+          }
+        }
+      }
+      if (checkStatus && getResponseStatus(response) != 200) {
+        connectCheckerRtsp.onConnectionFailedRtsp("Error configure stream, " + response);
+      }
+      Log.i(TAG, response);
+      return response;
+    } catch (IOException e) {
+      Log.e(TAG, "read error", e);
+      return null;
     }
   }
 }
